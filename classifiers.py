@@ -1,6 +1,7 @@
-# WaterQualityClassifier.py（重构示例）
+# 将下面整个类内容替换你现有的 WaterQualityClassifier 定义
 from __future__ import annotations
-from typing import List, Tuple
+from typing import List, Tuple, Iterable, Optional
+import re
 
 
 class WaterQualityClassifier:
@@ -43,11 +44,78 @@ class WaterQualityClassifier:
         "IV类":"IV类","V类":"V类","劣V类":"劣V类"
     }
 
-    def __init__(self, water_type: str = "河流"):
+    def __init__(self, water_type: str = "河流", lake_stations: Optional[Iterable[str]] = None):
         """
-        water_type: "河流" 或 "湖库"，决定总磷的判定标准
+        water_type: "河流" 或 "湖库"，决定总磷的默认判定标准（可在调用 classify_total_phosphorus_by_type 时被覆盖）
+        lake_stations: 可选的初始湖库站点集合（应用端可在启动时注入 LAKE_TP_STATIONS）
         """
         self.water_type = water_type
+        # 内部保存归一化（小写、去首尾空白、去括号内内容等）
+        self._lake_station_set: set[str] = set()
+        if lake_stations:
+            self.set_lake_stations(lake_stations)
+
+    # ----------------- 站点集合管理 API -----------------
+    @staticmethod
+    def _norm_station(s: Optional[str]) -> str:
+        """把站名归一化为小写、去括号内容、折叠空白，便于匹配"""
+        if s is None:
+            return ""
+        s = str(s).strip()
+        if not s:
+            return ""
+        # 去掉中英文括号内内容
+        s = re.sub(r"\（.*?\）|\(.*?\)", "", s)
+        # 去掉常见编号前缀 (如 "01-" 等)
+        s = re.sub(r"^[\s\-_0-9]+", "", s)
+        # 折叠空白并小写
+        s = re.sub(r"[\s　]+", " ", s).strip().lower()
+        return s
+
+    def set_lake_stations(self, names: Iterable[str]) -> None:
+        """覆盖式设置湖库站点集合（传入可迭代对象）"""
+        try:
+            self._lake_station_set = {self._norm_station(n) for n in names if n is not None}
+        except Exception:
+            # 容错：若任何异常就清空集合
+            self._lake_station_set = set()
+
+    def add_lake_station(self, name: str) -> None:
+        """增量添加单个站点（设计时或运行时都可调用）"""
+        if not hasattr(self, "_lake_station_set"):
+            self._lake_station_set = set()
+        self._lake_station_set.add(self._norm_station(name))
+
+    def remove_lake_station(self, name: str) -> None:
+        """从集合中移除站点（没有则忽略）"""
+        try:
+            self._lake_station_set.discard(self._norm_station(name))
+        except Exception:
+            pass
+
+    def is_lake_station(self, station_name: Optional[str], fuzzy: bool = True) -> bool:
+        """
+        判断某站点是否为湖库站点。
+        - 先做规范化精确匹配；
+        - 若 fuzzy=True 且未匹配到，再尝试宽松匹配（子串/倒置子串）以容错常见写法差异。
+        """
+        if not station_name:
+            return False
+        n = self._norm_station(station_name)
+        sset = getattr(self, "_lake_station_set", set())
+        if not sset:
+            return False
+        if n in sset:
+            return True
+        if not fuzzy:
+            return False
+        # 宽松匹配：站名包含集合中某个项或集合某项包含站名
+        for s in sset:
+            if not s:
+                continue
+            if s in n or n in s:
+                return True
+        return False
 
     # ----------------- 分类方法（按指标） -----------------
     @staticmethod
@@ -124,8 +192,29 @@ class WaterQualityClassifier:
         if n <= 0.2:   return "V类"
         return "劣V类"
 
-    def classify_total_phosphorus_by_type(self, value: float | str) -> str:
-        if self.water_type == "湖库":
+    def classify_total_phosphorus_by_type(
+        self,
+        value: float | str,
+        station_name: Optional[str] = None,
+        explicit_water_type: Optional[str] = None
+    ) -> str:
+        """
+        更智能的总磷判定：
+        - explicit_water_type 优先（调用者显式指定 "湖库" 或 "河流"）
+        - 否则如果传入 station_name 且为湖库（is_lake_station）则按湖库标准
+        - 否则使用实例 self.water_type（初始化时的默认）
+        """
+        # 优先 explicit
+        if explicit_water_type:
+            wt = explicit_water_type
+        else:
+            # 若给了站名并 classifier 里能判断
+            if station_name and self.is_lake_station(station_name):
+                wt = "湖库"
+            else:
+                wt = self.water_type or "河流"
+
+        if wt == "湖库":
             return self.classify_total_phosphorus_lake(value)
         else:
             return self.classify_total_phosphorus(value)
@@ -146,6 +235,7 @@ class WaterQualityClassifier:
         if "氨氮" in name:
             return self.classify_ammonia_nitrogen(value)
         if "总磷" in name or "tp" in name:
+            # 注意：此处使用实例方法，但若需要按站点决定，请调用 classify_total_phosphorus_by_type(...)
             return self.classify_total_phosphorus_by_type(value)
         return ""
 
@@ -198,7 +288,7 @@ class WaterQualityClassifier:
         # pH 特殊处理
         if "ph" in mid.lower():
             return self.classify_pH(value)
-        # 其它通过 classify_metric（内部会根据字符串匹配调用对应函数）
+        # 其它通过 classify_metric（内部会根据字符串匹配调用对应函数） but note for TP you may want station_name
         return self.classify_metric(metric_id, value)
     
     @staticmethod
@@ -211,27 +301,3 @@ class WaterQualityClassifier:
         if "氨氮" in name: return "氨氮"
         if "总磷" in name: return "总磷"
         return None
-    
-# 示范在你的 UI 代码中调用方式：
-def evaluate_and_display(self):
-    # 假设你已经从界面获取了这些原始值
-    ph_value        = self.ph_lineedit.text()
-    do_value        = self.do_lineedit.text()
-    cod_value       = self.cod_lineedit.text()
-    ammonia_value   = self.ammonia_lineedit.text()
-    phosphorus_value= self.phosphorus_lineedit.text()
-    water_type      = self.water_type_combo.currentText()  # "河流" 或 "湖库"
-
-    # 实例化分类器
-    classifier = WaterQualityClassifier(self.water_type_combo_box.currentText())
-
-    # 读取并分类各指标
-    ph_category        = classifier.classify_pH(ph_value)
-    do_category        = classifier.classify_dissolved_oxygen(do_value)
-    cod_category       = classifier.classify_permanganate_index(cod_value)
-    ammonia_category   = classifier.classify_ammonia_nitrogen(ammonia_value)
-    phosphorus_category= classifier.classify_total_phosphorus_by_type(phosphorus_value)
-
-    # 计算总体
-    categories = [ph_category, do_category, cod_category, ammonia_category, phosphorus_category]
-    overall = WaterQualityClassifier.overall_category([c for c in categories if c])
