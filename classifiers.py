@@ -24,8 +24,6 @@ class WaterQualityClassifier:
         6: "劣V类",
     }
 
-    LAKE_TP_STATIONS = {"长潭水库坝口(国)", "温潭", "大众旺", "佛岭水库", "长潭水库"}
-
     # —— 可视化配色（供 UI 使用）——
     CATEGORY_COLORS = {
         "合格": "#CFFFFF",
