@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+*.pyo
+*.dll
+*.so
+*.log
+.vscode/
+.idea/
+
+# 忽略所有 csv 数据文件
+*.csv
+'@ | Set-Content -Path .gitignore -Encoding UTF8
