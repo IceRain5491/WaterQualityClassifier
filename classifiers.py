@@ -1,4 +1,3 @@
-# 将下面整个类内容替换你现有的 WaterQualityClassifier 定义
 from __future__ import annotations
 from typing import List, Tuple, Iterable, Optional
 import re
