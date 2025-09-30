@@ -150,6 +150,24 @@ class WaterQualityClassifier:
         if n <= 10.0: return "IV类"
         if n <= 15.0: return "V类"
         return "劣V类"
+        
+    @staticmethod
+    def classify_codcr(value: float | str) -> str:
+        try:
+            n = float(value)
+        except Exception:
+            return ""
+        if n < 0:
+            return ""
+        if n <= 15:
+            return "I类" 
+        if n <= 20:
+            return "III类"
+        if n <= 30:
+            return "IV类"
+        if n <= 40:
+            return "V类"
+        return "劣V类"
 
     @staticmethod
     def classify_ammonia_nitrogen(value: float | str) -> str:
@@ -218,45 +236,107 @@ class WaterQualityClassifier:
         else:
             return self.classify_total_phosphorus(value)
 
+    @staticmethod
+    def _normalize_metric_name(name: str) -> str:
+        s = str(name).strip()
+        # 常见全角括号/冒号 → 半角
+        s = s.replace("（", "(").replace("）", ")").replace("：", ":")
+        # Unicode 下标 m/n → m/n
+        s = s.replace("ₘ", "m").replace("ₙ", "n")
+        # 去空白并小写
+        s = re.sub(r"\s+", "", s).lower()
+        return s
+
+    @staticmethod
+    def recognized_metric_id(metric_name: str) -> str | None:
+        raw = str(metric_name)
+        low = WaterQualityClassifier._normalize_metric_name(raw)
+
+        # pH
+        if "ph" in low:
+            return "pH"
+
+        # 溶解氧
+        if ("溶解氧" in raw) or re.search(r"\bdo\b", low):
+            return "溶解氧"
+
+        # —— 先判 CODMn（避免 'cod' 被误入 CODCr）——
+        if ("高锰酸" in raw) or ("codmn" in low) or re.search(r"cod(\(|-|_)?mn", low):
+            return "CODMn"
+
+        # CODCr（化学需氧量）
+        if ("化学需氧量" in raw) or ("codcr" in low) or ("cod(cr)" in low):
+            return "CODCr"
+
+        # 裸 'cod'：无 'mn' 时默认按 CODCr 处理
+        if re.search(r"\bcod\b", low):
+            return "CODCr"
+
+        # 氨氮
+        if "氨氮" in raw or re.search(r"\bnh[-_ ]?3[-_ ]?n\b", low):
+            return "氨氮"
+
+        # 总磷 / TP
+        if "总磷" in raw or re.search(r"\btp\b", low):
+            return "总磷"
+
+        return None
+
     def classify_metric(self, metric_name: str, value: float | str) -> str:
-        """
-        根据指标名调用对应的分类方法。
-        metric_name: "pH", "溶解氧", "CODMn"（或 "CODₘₙ"）、"氨氮", "总磷"
-        """
-        # 规范 metric_name（一些来源可能写法不同）
-        name = str(metric_name).strip().lower()
-        if "ph" in name:
+        mid = self.recognized_metric_id(metric_name)
+        if not mid:
+            return ""
+
+        if mid == "pH":
             return self.classify_pH(value)
-        if "溶解氧" in name:
+        if mid == "溶解氧":
             return self.classify_dissolved_oxygen(value)
-        if "高锰酸" in name or "cod" in name:
+        if mid == "CODMn":
             return self.classify_permanganate_index(value)
-        if "氨氮" in name:
+        if mid == "CODCr":
+            return self.classify_codcr(value)
+        if mid == "氨氮":
             return self.classify_ammonia_nitrogen(value)
-        if "总磷" in name or "tp" in name:
-            # 注意：此处使用实例方法，但若需要按站点决定，请调用 classify_total_phosphorus_by_type(...)
-            return self.classify_total_phosphorus_by_type(value)
-        return ""
+        if mid == "总磷":
+            try:
+                return self.classify_total_phosphorus_by_type(value)
+            except Exception:
+                func = getattr(self, "classify_total_phosphorus", None)
+                return func(value) if callable(func) else ""
+
+        func = getattr(self, f"classify_{mid}", None)
+        return func(value) if callable(func) else ""
 
     # ----------------- 辅助：阈值和可视化 -----------------
     @classmethod
     def metric_boundaries(cls, metric_id: str, water_type: str) -> List[Tuple[str, float]]:
-        """返回按顺序的 (label, value) 阈值列表（由好到差或按业务约定）"""
         mid = str(metric_id)
-        if "ph" in mid.lower():
+        low = cls._normalize_metric_name(mid)
+
+        if "ph" in low:
             return [("pH下限", 6.0), ("pH上限", 9.0)]
+
         if "溶解氧" in mid:
             return [("I类", 7.5), ("II类", 6.0), ("III类", 5.0), ("IV类", 3.0), ("V类", 2.0)]
-        if "cod" in mid.lower() or "高锰酸" in mid:
+
+        # —— 先判 CODMn（高锰酸盐指数）——
+        if ("高锰酸" in mid) or ("codmn" in low) or re.search(r"cod(\(|-|_)?mn", low):
             return [("I类", 2.0), ("II类", 4.0), ("III类", 6.0), ("IV类", 10.0), ("V类", 15.0)]
+
+        # —— 再判 CODCr（化学需氧量）; 裸 cod 也归到 CODCr —— 
+        if ("化学需氧量" in mid) or ("codcr" in low) or ("cod(cr)" in low) or re.search(r"\bcod\b", low):
+            return [("I/II", 15.0), ("III", 20.0), ("IV", 30.0), ("V", 40.0)]
+
         if "氨氮" in mid:
             return [("I类", 0.15), ("II类", 0.5), ("III类", 1.0), ("IV类", 1.5), ("V类", 2.0)]
-        if "总磷" in mid:
+
+        if "总磷" in mid or "tp" in low:
             if water_type == "湖库":
                 return [("I类", 0.015), ("II类", 0.025), ("III类", 0.05), ("IV类", 0.1), ("V类", 0.2)]
             else:
                 return [("I类", 0.02), ("II类", 0.1), ("III类", 0.2), ("IV类", 0.3), ("V类", 0.4)]
         return []
+
 
     @classmethod
     def get_visual_boundaries(cls, metric_id: str, water_type: str) -> List[Tuple[str, float, str]]:
@@ -289,14 +369,3 @@ class WaterQualityClassifier:
             return self.classify_pH(value)
         # 其它通过 classify_metric（内部会根据字符串匹配调用对应函数） but note for TP you may want station_name
         return self.classify_metric(metric_id, value)
-    
-    @staticmethod
-    def recognized_metric_id(colname: str) -> str | None:
-        name = str(colname)
-        low = name.lower()
-        if "ph" in low: return "pH"
-        if "溶解氧" in name: return "溶解氧"
-        if ("高锰酸盐" in name) or ("cod" in low): return "CODMn"
-        if "氨氮" in name: return "氨氮"
-        if "总磷" in name: return "总磷"
-        return None
