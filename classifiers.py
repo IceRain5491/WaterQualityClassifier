@@ -119,6 +119,7 @@ class WaterQualityClassifier:
     # ----------------- 分类方法（按指标） -----------------
     @staticmethod
     def classify_pH(value: float | str) -> str:
+        """pH值"""
         try:
             n = float(value)
         except Exception:
@@ -127,6 +128,7 @@ class WaterQualityClassifier:
 
     @staticmethod
     def classify_dissolved_oxygen(value: float | str) -> str:
+        """溶解氧"""
         try:
             n = float(value)
         except Exception:
@@ -140,6 +142,7 @@ class WaterQualityClassifier:
 
     @staticmethod
     def classify_permanganate_index(value: float | str) -> str:
+        """高锰酸盐指数"""
         try:
             n = float(value)
         except Exception:
@@ -153,6 +156,7 @@ class WaterQualityClassifier:
         
     @staticmethod
     def classify_codcr(value: float | str) -> str:
+        """化学需氧量"""
         try:
             n = float(value)
         except Exception:
@@ -171,6 +175,7 @@ class WaterQualityClassifier:
 
     @staticmethod
     def classify_ammonia_nitrogen(value: float | str) -> str:
+        """氨氮"""
         try:
             n = float(value)
         except Exception:
@@ -184,6 +189,7 @@ class WaterQualityClassifier:
 
     @staticmethod
     def classify_total_phosphorus(value: float | str) -> str:
+        """总磷（河流）"""
         try:
             n = float(value)
         except Exception:
@@ -198,6 +204,7 @@ class WaterQualityClassifier:
 
     @staticmethod
     def classify_total_phosphorus_lake(value: float | str) -> str:
+        """总磷（湖库）"""
         try:
             n = float(value)
         except Exception:
@@ -207,6 +214,34 @@ class WaterQualityClassifier:
         if n <= 0.05:  return "III类"
         if n <= 0.1:   return "IV类"
         if n <= 0.2:   return "V类"
+        return "劣V类"
+
+    @staticmethod
+    def classify_total_nitrogen(value: float | str) -> str:
+        """总氮"""
+        try:
+            n = float(value)
+        except Exception:
+            return ""
+        if n <= 0.2: return "I类"
+        if n <= 0.5: return "II类"
+        if n <= 1.0: return "III类"
+        if n <= 1.5: return "IV类"
+        if n <= 2.0: return "V类"
+        return "劣V类"
+
+    @staticmethod
+    def classify_biochemical_oxygen_demand(value: float | str) -> str:
+        """生化需氧量"""
+        try:
+            n = float(value)
+        except Exception:
+            return ""
+        if n <= 3.0: return "I类"
+        if n <= 3.0: return "II类"
+        if n <= 4.0: return "III类"
+        if n <= 6.0: return "IV类"
+        if n <= 10.0: return "V类"
         return "劣V类"
 
     def classify_total_phosphorus_by_type(
@@ -280,6 +315,14 @@ class WaterQualityClassifier:
         if "总磷" in raw or re.search(r"\btp\b", low):
             return "总磷"
 
+        # 总氮 / TN
+        if "总氮" in raw or re.search(r"\btn\b", low):
+            return "总氮"
+
+        # 生化需氧量 / BOD
+        if ("生化需氧量" in raw) or ("bod" in low) or re.search(r"\bbod\b", low):
+            return "生化需氧量"
+
         return None
 
     def classify_metric(self, metric_name: str, value: float | str) -> str:
@@ -303,6 +346,10 @@ class WaterQualityClassifier:
             except Exception:
                 func = getattr(self, "classify_total_phosphorus", None)
                 return func(value) if callable(func) else ""
+        if mid == "总氮":
+            return self.classify_total_nitrogen(value)
+        if mid == "生化需氧量":
+            return self.classify_biochemical_oxygen_demand(value)
 
         func = getattr(self, f"classify_{mid}", None)
         return func(value) if callable(func) else ""
@@ -335,6 +382,12 @@ class WaterQualityClassifier:
                 return [("I类", 0.015), ("II类", 0.025), ("III类", 0.05), ("IV类", 0.1), ("V类", 0.2)]
             else:
                 return [("I类", 0.02), ("II类", 0.1), ("III类", 0.2), ("IV类", 0.3), ("V类", 0.4)]
+
+        if "总氮" in mid or "tn" in low:
+            return [("I类", 0.2), ("II类", 0.5), ("III类", 1.0), ("IV类", 1.5), ("V类", 2.0)]
+
+        if "生化需氧量" in mid or "bod" in low:
+            return [("I类", 3.0), ("II类", 3.0), ("III类", 4.0), ("IV类", 6.0), ("V类", 10.0)]
         return []
 
 
