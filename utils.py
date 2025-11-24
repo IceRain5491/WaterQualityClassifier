@@ -426,3 +426,69 @@ def color_category_cells(ws, row: int, headers: list, classifier_cls):
                 except Exception:
                     pass
 
+
+def color_value_cells(ws, row: int, headers: list, metric_to_category: dict, classifier_cls):
+    """
+    为行 `row` 中的具体指标“值列”着色。
+    - headers: 与工作表第一行一致的表头列表
+    - metric_to_category: {指标显示名: 类别字符串}，类别字符串可为多种写法（'I类'/'Ⅰ类'/'合格'/...），函数会做归一化
+    - classifier_cls: 提供 CATEGORY_COLORS 的分类器类
+    说明：当未输出“具体指标类别”列时，仍可使用该函数对值列上色。
+    """
+    if not headers:
+        headers = [cell.value for cell in ws[1]]
+
+    if not isinstance(metric_to_category, dict):
+        return
+
+    for col_idx, header in enumerate(headers, start=1):
+        if not header:
+            continue
+        # 只处理“不是类别列”的值列
+        if str(header).endswith("类别"):
+            continue
+
+        metric_name = str(header).strip()
+        if metric_name not in metric_to_category:
+            # 宽松匹配：若存在“化学需氧量(CODCr)”与“化学需氧量”混用等情况
+            alt = sanitize_label(metric_name)
+            hit = None
+            for k in metric_to_category.keys():
+                if sanitize_label(k) == alt:
+                    hit = k
+                    break
+            if hit is None:
+                continue
+            metric_name = hit
+
+        cat_raw = metric_to_category.get(metric_name)
+        if not cat_raw:
+            continue
+
+        try:
+            norm_cat = normalize_category(cat_raw)
+        except Exception:
+            norm_cat = ""
+
+        color_hex = None
+        if norm_cat:
+            color_hex = classifier_cls.CATEGORY_COLORS.get(norm_cat)
+        if color_hex is None:
+            color_hex = classifier_cls.CATEGORY_COLORS.get(str(cat_raw))
+        if not color_hex:
+            continue
+
+        rgb = hex_to_openpyxl(color_hex)
+        if not rgb:
+            continue
+
+        cell = ws.cell(row=row, column=col_idx)
+        try:
+            fill = PatternFill(fill_type='solid', start_color="FF"+rgb, end_color="FF"+rgb)
+            cell.fill = fill
+        except Exception:
+            try:
+                fill = PatternFill(fill_type='solid', start_color=rgb, end_color=rgb)
+                cell.fill = fill
+            except Exception:
+                pass
