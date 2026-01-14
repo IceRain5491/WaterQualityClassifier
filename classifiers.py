@@ -209,7 +209,7 @@ class WaterQualityClassifier:
             n = float(value)
         except Exception:
             return ""
-        if n <= 0.015: return "I类"
+        if n <= 0.01: return "I类"
         if n <= 0.025: return "II类"
         if n <= 0.05:  return "III类"
         if n <= 0.1:   return "IV类"
